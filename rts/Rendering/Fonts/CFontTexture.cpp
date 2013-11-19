@@ -95,6 +95,10 @@ CFontTexture::CFontTexture(const std::string& fontfile, int size, int _outlinesi
 {
 	if (size <= 0)
 		size = 14;
+
+	static const int FT_INTERNAL_DPI = 64;
+	normScale = 1.0f / (size * FT_INTERNAL_DPI);
+
 #ifndef   HEADLESS
 	std::string fontPath(fontfile);
 	CFileHandler* f = new CFileHandler(fontPath);
@@ -150,6 +154,10 @@ CFontTexture::CFontTexture(const std::string& fontfile, int size, int _outlinesi
 	fontDescender = FT_MulFix(face->descender, face->size->metrics.y_scale);
 	lineHeight = FT_MulFix(face->height, face->size->metrics.y_scale);
 
+	fontDescender = normScale * FT_MulFix(face->descender, face->size->metrics.y_scale);
+	//lineHeight = FT_MulFix(face->height, face->size->metrics.y_scale); // bad results
+	lineHeight = face->height / face->units_per_EM;
+
 	if(lineHeight<=0)
 		lineHeight = 1.25 * (face->bbox.yMax - face->bbox.yMin);
 
@@ -188,12 +196,12 @@ float CFontTexture::GetOutlineWeight() const
 	return outlineWeight;
 }
 
-int CFontTexture::GetLineHeightA() const
+float CFontTexture::GetLineHeight() const
 {
 	return lineHeight;
 }
 
-int CFontTexture::GetFontDescender() const
+float CFontTexture::GetDescender() const
 {
 	return fontDescender;
 }
@@ -221,7 +229,7 @@ const CFontTexture::GlyphInfo& CFontTexture::GetGlyph(char32_t ch)
 #endif
 }
 
-int CFontTexture::GetKerning(char32_t lchar, char32_t rchar)
+float CFontTexture::GetKerning(char32_t lchar, char32_t rchar)
 {
 #ifndef HEADLESS
 	//FIXME cache!
@@ -231,7 +239,7 @@ int CFontTexture::GetKerning(char32_t lchar, char32_t rchar)
 		const GlyphInfo& right = GetGlyph(rchar);
 		FT_Vector kerning;
 		FT_Get_Kerning(face, left.index, right.index, FT_KERNING_DEFAULT, &kerning);
-		return left.advance + kerning.x;
+		return left.advance + normScale * kerning.x;
 	}
 //   else
 //       return left.advance; // This font does not contain kerning
@@ -240,7 +248,7 @@ int CFontTexture::GetKerning(char32_t lchar, char32_t rchar)
 #endif
 }
 
-int CFontTexture::GetKerning(const GlyphInfo& lgl, const GlyphInfo& rgl)
+float CFontTexture::GetKerning(const GlyphInfo& lgl, const GlyphInfo& rgl)
 {
 #ifndef HEADLESS
 	//FIXME cache!
@@ -248,7 +256,7 @@ int CFontTexture::GetKerning(const GlyphInfo& lgl, const GlyphInfo& rgl)
 	{
 		FT_Vector kerning;
 		FT_Get_Kerning(face, lgl.index, rgl.index, FT_KERNING_DEFAULT, &kerning);
-		return lgl.advance + kerning.x;
+		return lgl.advance + normScale * kerning.x;
 	}
 	//  else
 	//      return lgl.advance;
@@ -278,72 +286,45 @@ CFontTexture::GlyphInfo& CFontTexture::LoadGlyph(char32_t ch)
 
 	FT_GlyphSlot slot = face->glyph;
 
-	const float xbearing = slot->metrics.horiBearingX;
-	const float ybearing = slot->metrics.horiBearingY;
+	const float xbearing = slot->metrics.horiBearingX * normScale;
+	const float ybearing = slot->metrics.horiBearingY * normScale;
 
-	glyph.advance   = slot->advance.x;
-	glyph.height    = slot->metrics.height;
+	glyph.size.x = xbearing;
+	glyph.size.y = ybearing - fontDescender;
+	glyph.size.w =  slot->metrics.width * normScale;
+	glyph.size.h = -slot->metrics.height * normScale;
+
+	glyph.advance   = slot->advance.x * normScale;
+	glyph.height    = slot->metrics.height * normScale;
 	glyph.descender = ybearing - glyph.height;
 
-	//! Get glyph bound box
-	glyph.size = IGlyphRect(xbearing,                    // x0
-				ybearing - fontDescender,    // y0
-				 slot->metrics.width,        // w
-				-slot->metrics.height);      // h
+	const int width  = slot->bitmap.width;
+	const int height = slot->bitmap.rows;
 
-	int width  = slot->bitmap.width;
-	int height = slot->bitmap.rows;
-	static const int padding = 1;
-	if (width>0 && height>0) {
-		//FIXME
-		/*glyph.size.x-=padding;
-		glyph.size.y-=padding;
-		glyph.size.w+=2*padding;
-		glyph.size.h+=2*padding;
-		*/
-		unsigned char* pixels_buffer = new unsigned char[width * height];
-		glyph.texCord = AllocateGlyphRect(width+2*padding,height+2*padding);
-
-		const unsigned char* source_pixels = slot->bitmap.buffer;
-
-		/*  if(slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO)
-		  {
-		      // Pixels are 1 bit monochrome values
-		      for (int y = 0; y < height; ++y)
-		      {
-		          for (int x = 0; x < width; ++x)
-		          {
-		              // The color channels remain white, just fill the alpha channel
-		              int index = x + y * width;
-		              pixels_buffer[index] = ((source_pixels[x / 8]) & (1 << (7 - (x % 8)))) ? 255 : 0;
-		          }
-		          source_pixels += slot->bitmap.pitch;
-		      }
-		  }
-		  else
-		  {*/
-		// Pixels are 8 bits gray levels
-		for(int y = 0; y < height; y++) {
-			//!Flip y cords
-			//const unsigned char* src = source_pixels + (height - 1 - y) * slot->bitmap.pitch;
-			const unsigned char* src = source_pixels + y * slot->bitmap.pitch;
-			unsigned char* dst = pixels_buffer + y * width;
-			memcpy(dst,src,width);
-		}
-		//  }
-		Clear(glyph.texCord.x,glyph.texCord.y,glyph.texCord.w,glyph.texCord.h);
-		glyph.texCord.x += padding;
-		glyph.texCord.y += padding;
-		glyph.texCord.w -= 2 * padding;
-		glyph.texCord.h -= 2 * padding;
-
-		Update(pixels_buffer, glyph.texCord.x, glyph.texCord.y,
-		       width, height);
-
-		delete[] pixels_buffer;
-	} else {
-		LOG_L(L_ERROR, "invalid glyph size");
+	if (width<=0 || height<=0) { //FIXME
+		//LOG_L(L_ERROR, "invalid glyph size");
+		return glyph;
 	}
+
+	if (slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY) {
+		LOG_L(L_ERROR, "invalid pixeldata mode");
+		return glyph;
+	}
+
+	      unsigned char* dst_pixels = new unsigned char[width * height]; // alpha-only 8bit texture
+	const unsigned char* src_pixels = slot->bitmap.buffer;
+
+	// Pixels are 8 bits gray levels
+	for(int y = 0; y < height; y++) {
+		const unsigned char* src = src_pixels + y * slot->bitmap.pitch;
+		      unsigned char* dst = dst_pixels + y * width;
+		memcpy(dst, src, width);
+	}
+
+	glyph.texCord = AllocateGlyphRect(width, height);
+	Update(dst_pixels, glyph.texCord.x, glyph.texCord.y, width, height);
+
+	delete[] dst_pixels;
 	return glyph;
 #else
 	return glyphs[0];
@@ -383,6 +364,7 @@ CFontTexture::Row* CFontTexture::AddRow(int glyphWidth, int glyphHeight)
 CFontTexture::IGlyphRect CFontTexture::AllocateGlyphRect(int glyphWidth,int glyphHeight)
 {
 #ifndef   HEADLESS
+	//FIXME add padding
 	Row* row = FindRow(glyphWidth,glyphHeight);
 	if(!row)
 		row = AddRow(glyphWidth,glyphHeight);
@@ -402,7 +384,6 @@ void CFontTexture::CreateTexture(int w,int h)
 		throw texture_size_exception();
 
 	glPushAttrib(GL_PIXEL_MODE_BIT);
-	glEnable(GL_TEXTURE_2D);
 	GLuint ntex;
 	glGenTextures(1, &ntex);
 	glBindTexture(GL_TEXTURE_2D, ntex);
@@ -410,16 +391,22 @@ void CFontTexture::CreateTexture(int w,int h)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	if (GLEW_ARB_texture_border_clamp) {
+		static const GLfloat borderColor[4] = {1.0f,1.0f,1.0f,0.0f};
+		glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	} else {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	}
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	static const GLfloat borderColor[4] = {1.0f,1.0f,1.0f,0.0f};
-	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, w, h, 0, GL_ALPHA, GL_UNSIGNED_BYTE, 0);
 	glPopAttrib();
 
-	if(texture) {
-		unsigned char* pixels = new unsigned char[texWidth * texHeight ];
+	if (texture) {
+		//FIXME
+		unsigned char* pixels = new unsigned char[texWidth * texHeight];
 		glBindTexture(GL_TEXTURE_2D, texture);
 		glGetTexImage(GL_TEXTURE_2D, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels);
 		glDeleteTextures(1, (const GLuint*)&texture);
@@ -433,9 +420,9 @@ void CFontTexture::CreateTexture(int w,int h)
 		Update(pixels,0,0,oldsw,oldsh);
 		delete[] pixels;
 	} else {
-		texture=ntex;
-		texWidth=w;
-		texHeight=h;
+		texture   = ntex;
+		texWidth  = w;
+		texHeight = h;
 	}
 #endif
 }
@@ -444,7 +431,6 @@ void CFontTexture::Update(const unsigned char* pixels,int x,int y,int w,int h)
 {
 #ifndef HEADLESS
 	//FIXME readd shadow blur
-	glEnable(GL_TEXTURE_2D);
 	glPushAttrib(GL_PIXEL_MODE_BIT);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, (unsigned int)w, (unsigned int)h, GL_ALPHA, GL_UNSIGNED_BYTE, pixels);

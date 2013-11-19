@@ -27,12 +27,12 @@ public:
 	CFontTexture(const std::string& fontfile, int size, int outlinesize, float  outlineweight);
 	virtual ~CFontTexture();
 public:
-	int GetTextureWidth() const;
-	int GetTextureHeight() const;
+	int   GetTextureWidth() const;
+	int   GetTextureHeight() const;
 	int   GetOutlineWidth() const;
 	float GetOutlineWeight() const;
-	int GetLineHeightA() const;
-	int GetFontDescender() const;
+	float GetLineHeight() const;
+	float GetDescender() const;
 
 	int GetTexture() const;
 
@@ -42,43 +42,39 @@ public:
 			w(0),h(0) {
 		};
 
-		IGlyphRect(int _x,int _y,int _w,int _h):
-			x(_x),
-			y(_y),
-			w(_w),
-			h(_h) {
+		IGlyphRect(float _x,float _y,float _w,float _h):
+			x(_x),y(_y),
+			w(_w),h(_h) {
 		};
 
-		int x0() const {
+		float x0() const {
 			return x;
 		};
-		int x1() const {
+		float x1() const {
 			return x+w;
 		};
-		int y0() const {
+		float y0() const {
 			return y;
 		};
-		int y1() const {
+		float y1() const {
 			return y+h;
 		};
 
-		int x,y;
-		int w,h;
+		float x,y;
+		float w,h;
 	};
 
 	struct GlyphInfo {
-		GlyphInfo():
-			size(),
-			texCord(0,0,1,1),
-			advance(1),
-			height(1),
-			descender(0),
-			index(0) {
-		};
+		GlyphInfo()
+		: advance(0)
+		, height(0)
+		, descender(0)
+		, index(0)
+		{ };
 
 		IGlyphRect size;
 		IGlyphRect texCord;
-		int advance, height, descender;
+		float advance, height, descender;
 		char32_t index;
 	};
 	// Get or load a glyph
@@ -88,14 +84,16 @@ protected:
 	const FT_Face& GetFace() const;
 
 protected:
-	int GetKerning(char32_t lchar, char32_t rchar);
-	int GetKerning(const CFontTexture::GlyphInfo& lgl,const CFontTexture::GlyphInfo& rgl);
+	float GetKerning(char32_t lchar, char32_t rchar);
+	float GetKerning(const CFontTexture::GlyphInfo& lgl,const CFontTexture::GlyphInfo& rgl);
 
 private:
 	int outlineSize;
 	float outlineWeight;
-	int lineHeight;
-	int fontDescender;
+	float lineHeight;
+	float fontDescender;
+
+	float normScale;
 
 private:
 	unsigned int texWidth,texHeight;

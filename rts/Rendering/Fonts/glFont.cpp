@@ -1235,7 +1235,12 @@ void CglFont::End()
 	// Because texture size can be changed, texture cordinats are in pixels
 	glMatrixMode(GL_TEXTURE);
 	glPushMatrix();
-	glScalef(1.f/(float)GetTextureWidth(), 1.f/(float)GetTextureHeight(), 1.f);
+	const int width = GetTextureWidth();
+	const int height = GetTextureHeight();
+	if ((width == 0) || (height == 0)) // avoid SIGFPE (spring-headless)
+		return;
+
+	glScalef(1.f/(float)width, 1.f/(float)height, 1.f);
 	glMatrixMode(GL_MODELVIEW);
 
 	if (va2->drawIndex() > 0) {
